@@ -1,0 +1,13 @@
+#!/usr/bin/env bpftrace
+
+tracepoint:syscalls:sys_enter_epoll_wait
+{
+  @hits[probe,comm,pid] = count();
+}
+
+interval:s:$1
+{
+  time();
+  print(@hits,$2,$1);
+  clear(@hits);
+}

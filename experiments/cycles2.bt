@@ -1,0 +1,41 @@
+#!/usr/bin/env bpftrace
+
+#define NCPU 4
+
+hardware:cycles:1e6 
+{
+  @cycles[cpu,@back[cpu]] += 1;
+}
+
+hardware:ref-cycles:1e6
+{
+  @ref_cycles[cpu,@back[cpu]] += 1;
+}
+
+hardware:bus-cycles:1e8
+{
+  $front = @back[cpu];
+  @back[cpu] = (@back[cpu] + 1) % 4;
+
+  //concurrency bad
+  /*
+  $tot_cycles = (uint64)0;
+  $tot_ref_cycles = (uint64)0;
+  $i = 0;
+  while ( $i < NCPU ) {
+    $tot_cycles += @cycles[$i,$front];
+    @cycles[$i,$front] = 0;
+    $tot_ref_cycles += @ref_cycles[$i,$front];
+    @ref_cycles[$i,$front] = 0;
+    ++$i;
+  }
+  */
+  $tot_cycles = @cycles[cpu,$front];
+  @cycles[cpu,$front] -= $tot_cycles;
+  $tot_ref_cycles = @ref_cycles[cpu,$front];
+  @ref_cycles[cpu,$front] -= $tot_ref_cycles;
+  time();
+  printf("Cycles:     %6d\n", $tot_cycles);
+  printf("Ref Cycles: %6d\n", $tot_ref_cycles);
+}
+

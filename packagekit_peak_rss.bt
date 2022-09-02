@@ -1,0 +1,37 @@
+#!/usr/bin/env bpftrace
+
+// Will not work until kernel 5.19
+
+/*
+BEGIN
+{
+  cat("/sys/fs/cgroup/system.slice/packagekit.service/memory.peak");
+}
+*/
+
+// Turns out that identifying the cgroup that a task_struct belongs to is...
+// involved.
+/*
+iter:task
+{
+  $rss_max = ctx->task->mm->hiwater_rss * 4 ; //page size
+  printf("%6d %16s hiwater %8d KiB\n", ctx->task->pid, ctx->task->comm, $rss_max);
+}
+*/
+
+//t:sched:sched_process_exit
+t:raw_syscalls:sys_enter
+/ cgroup == cgroupid("/sys/fs/cgroup/system.slice/packagekit.service") /
+{
+  $rss_max = curtask->mm->hiwater_rss * 4 ; //page size
+  @[curtask->comm, curtask->pid] = $rss_max;
+  //printf("%6d %16s hiwater %8d KiB\n", curtask->pid, curtask->comm, $rss_max);
+}
+
+interval:s:5
+{
+  time();
+  print(@);
+  printf("\n");
+}
+

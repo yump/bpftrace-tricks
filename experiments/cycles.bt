@@ -1,0 +1,69 @@
+#!/usr/bin/env bpftrace
+
+#define NCPU 4
+
+BEGIN
+{
+  @back = (uint64)0;
+}
+
+hardware:cycles:1e6 
+{
+  @cycles[cpu,@back] += 1;
+}
+
+hardware:ref-cycles:1e6
+{
+  @ref_cycles[cpu,@back] += 1;
+}
+
+hardware:bus-cycles:1e5
+{
+  @bus_cycles[cpu,@back] += 1;
+}
+
+software:cpu-clock:1e5
+{
+  @cpu_clock[cpu,@back] += 1;
+}
+
+software:task-clock:1e5
+{
+  @task_clock[cpu,@back] += 1;
+}
+
+
+interval:s:1
+{
+  $front = @back;
+  @back = (@back + 1) % 4;
+
+  $tot_cycles = (uint64)0;
+  $tot_ref_cycles = (uint64)0;
+  $tot_bus_cycles = (uint64)0;
+  $tot_cpu_clock = (uint64)0;
+  $tot_task_clock = (uint64)0;
+  $i = 0;
+  while ( $i < NCPU ) {
+    $tot_cycles += @cycles[$i,$front];
+    @cycles[$i,$front] = 0;
+    $tot_ref_cycles += @ref_cycles[$i,$front];
+    @ref_cycles[$i,$front] = 0;
+    $tot_bus_cycles += @bus_cycles[$i,$front];
+    @bus_cycles[$i,$front] = 0;
+    $tot_cpu_clock += @cpu_clock[$i,$front];
+    @cpu_clock[$i,$front] = 0;
+    $tot_task_clock += @task_clock[$i,$front];
+    @task_clock[$i,$front] = 0;
+    ++$i;
+  }
+  time();
+  printf("Cycles:     %6d\n", $tot_cycles);
+  printf("Ref Cycles: %6d\n", $tot_ref_cycles);
+  printf("Bus Cycles: %6d\n", $tot_bus_cycles);
+  printf("CPU Clock:  %6d\n", $tot_cpu_clock);
+  printf("Task Clock: %6d\n\n", $tot_task_clock);
+  printf("Cyc/bus freq:   %5d\n", 1000 * $tot_cycles / $tot_bus_cycles);
+  printf("Ref/bus freq:   %5d\n\n", 1000 * $tot_ref_cycles / $tot_bus_cycles);
+}
+

@@ -1,0 +1,13 @@
+#!/usr/bin/env bpftrace
+
+kfunc:*aperf*,kfunc:arch_freq_get_on_cpu
+{ 
+  @[probe,comm] = count();
+}
+interval:s:10
+{
+  time();
+  print(@);
+  clear(@);
+}
+

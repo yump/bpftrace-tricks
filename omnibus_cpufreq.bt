@@ -1,0 +1,169 @@
+#!/usr/bin/env bpftrace
+
+BEGIN
+{
+  printf("args: %d %d %d %d %d\n", $1, $2, $3, $4, $5);
+  // $1 = ncpus
+  // $2 = delay_ms
+  // $3 = minimum_mhz
+  // $4 = maximum_mhz
+  // $5 = hist_bin_size_mhz
+  zero(@residency_nanos);
+  zero(@residency_ref_cycles);
+  zero(@residency_cycles);
+  @grand_tot_nanos = (uint64)0;
+  @grand_tot_ref_cycles = (uint64)0;
+  @grand_tot_cycles = (uint64)0;
+  @grand_tot_cpufreq_trans = (uint64)0;
+  @nanos_last = (uint64)nsecs;
+  $cpunum = 0;
+  while($cpunum < $1) {
+    @cycles[$cpunum] = (uint64)0;
+    @ref_cycles[$cpunum] = (uint64)0;
+    ++$cpunum;
+  }
+}
+
+hardware:cycles:1_000_000 //count of actual cpu cycles
+{
+  @cycles[cpu]++;
+}
+
+hardware:ref-cycles:1_000_000 //count of unhalted cpu time
+{
+  @ref_cycles[cpu]++;
+}
+
+tracepoint:power:pstate_sample
+{
+  // Count cpufreq transitions
+  @grand_tot_cpufreq_trans += (args->from != args->to);
+
+  // CPU frequency rounded to bin MHz
+  $khz = (uint64)(args->freq);
+  $bin = (uint64)$5;
+  // aah! https://github.com/iovisor/bpftrace/discussions/2095
+  //$mhz = ( ($khz + 500*$bin) / (1000 * $bin) ) * $bin;
+  $mhz = ( ($khz + (500*$bin)) / (1000 * $bin) ) * $bin;
+
+  // account time
+  $delta_ns = nsecs - @nanos_last;
+  @nanos_last += $delta_ns;
+  @residency_nanos[$mhz] += $delta_ns;
+  @grand_tot_nanos += $delta_ns;
+
+  // account cycles
+  $tot_cycles = (uint64)0;
+  $tot_ref_cycles = (uint64)0;
+  $cpunum = 0;
+  while($cpunum < $1) {
+    $tot_cycles += @cycles[$cpunum];
+    @cycles[$cpunum] = 0;
+    $tot_ref_cycles += @ref_cycles[$cpunum];
+    @ref_cycles[$cpunum] = 0;
+    ++$cpunum;
+  }
+  @residency_cycles[$mhz] += $tot_cycles;
+  @residency_ref_cycles[$mhz] += $tot_ref_cycles;
+  @grand_tot_cycles += $tot_cycles;
+  @grand_tot_ref_cycles += $tot_ref_cycles;
+}
+
+// Because some governors don't use pstate_sample, also update when anybody
+// reads scaling_cur_freq in /sys/.
+// FIXME: This causes a soft lock
+/*
+// Detect when a new frequency sample has actually been taken
+kprobe:aperfmperf_snapshot_khz / cpu == 0 /
+{
+  @new_sample_avalable = 1;
+}
+
+kretfunc:arch_freq_get_on_cpu
+/ cpu == 0 //maybe prevent soft lock FIXME: NOPE!
+  && @new_sample_avalable == 1 
+  /
+{
+  @new_sample_avalable = 0;
+  @grand_tot_cpufreq_trans++;
+  // CPU frequency rounded to bin MHz, from return value
+  $khz = (uint64)(retval);
+  // Otherwise same as tracepoint:power:pstate_sample
+  $bin = (uint64)$5;
+  // aah! https://github.com/iovisor/bpftrace/discussions/2095
+  //$mhz = ( ($khz + 500*$bin) / (1000 * $bin) ) * $bin;
+  $mhz = ( ($khz + (500*$bin)) / (1000 * $bin) ) * $bin;
+
+  // account time
+  $delta_ns = nsecs - @nanos_last;
+  @nanos_last += $delta_ns;
+  @residency_nanos[$mhz] += $delta_ns;
+  @grand_tot_nanos += $delta_ns;
+
+  // account cycles
+  $tot_cycles = (uint64)0;
+  $tot_ref_cycles = (uint64)0;
+  $cpunum = 0;
+  while($cpunum < $1) {
+    $tot_cycles += @cycles[$cpunum];
+    @cycles[$cpunum] = 0;
+    $tot_ref_cycles += @ref_cycles[$cpunum];
+    @ref_cycles[$cpunum] = 0;
+    ++$cpunum;
+  }
+  @residency_cycles[$mhz] += $tot_cycles;
+  @residency_ref_cycles[$mhz] += $tot_ref_cycles;
+  @grand_tot_cycles += $tot_cycles;
+  @grand_tot_ref_cycles += $tot_ref_cycles;
+}
+*/
+
+// Force a resample of the CPU frequency if it hasn't changed in a long time
+/*
+interval:ms:100 
+/ nanos - @nanos_last >= 100_000_000 /
+{
+  system("read x </sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq");
+}
+*/
+
+
+interval:ms:$2
+{
+  $sum_tw = (uint64)0;
+  $sum_refw = (uint64)0;
+  $sum_cyw = (uint64)0;
+  printf("\n MHz  ‰time ‰ref-cycles ‰cycles\n");
+  $mhz = (uint64)$3;
+  while ($mhz <= $4) {
+    printf("%4d %6d %11d %7d\n",
+      $mhz,
+      @residency_nanos[$mhz] * 1000 / @grand_tot_nanos,
+      @residency_ref_cycles[$mhz] * 1000 / @grand_tot_ref_cycles,
+      @residency_cycles[$mhz] * 1000 / @grand_tot_cycles
+      );
+    $sum_tw += ($mhz * @residency_nanos[$mhz]);
+    $sum_refw += ($mhz * @residency_ref_cycles[$mhz]);
+    $sum_cyw += ($mhz * @residency_cycles[$mhz]);
+    @residency_nanos[$mhz] = 0;
+    @residency_ref_cycles[$mhz] = 0;
+    @residency_cycles[$mhz] = 0;
+    $mhz += $5;
+  }
+  printf("AvgF: %5s %11s %7s\n", "wall", "awake", "cycles");
+  printf("%11d %11d %7d\n",
+    $sum_tw / @grand_tot_nanos,
+    $sum_refw / @grand_tot_ref_cycles,
+    $sum_cyw / @grand_tot_cycles
+    );
+  printf("transitions    --sample count--\n");
+  printf("%11d %11d %7d\n",
+    @grand_tot_cpufreq_trans,
+    @grand_tot_ref_cycles,
+    @grand_tot_cycles
+    );
+  @grand_tot_nanos = (uint64)0;
+  @grand_tot_ref_cycles = (uint64)0;
+  @grand_tot_cycles = (uint64)0;
+  @grand_tot_cpufreq_trans = (uint64)0;
+}

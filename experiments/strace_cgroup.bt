@@ -1,0 +1,20 @@
+#!/usr/bin/env bpftrace
+
+t:raw_syscalls:sys_enter
+/cgroup == cgroupid("/sys/fs/cgroup/system.slice/package-cstates.scope")/ 
+{ 
+  @start[tid]=nsecs; 
+} 
+
+t:syscalls:sys_exit* 
+/cgroup == cgroupid("/sys/fs/cgroup/system.slice/package-cstates.scope") && @start[tid]/ 
+{
+  @[comm,pid,probe]=stats(nsecs - @start[tid]); 
+  delete(@start[tid]);
+}
+
+interval:s:10 
+{
+  print(@);
+  clear(@);
+}

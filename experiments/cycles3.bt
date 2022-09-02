@@ -1,0 +1,22 @@
+#!/usr/bin/env bpftrace
+
+hardware:cycles:1e6
+{
+  ++@cycles[cpu];
+}
+
+hardware:bus-cycles:1e6
+{
+  $cycles_snap = @cycles[cpu];
+  @cycles[cpu] -= $cycles_snap;
+  @residency = lhist($cycles_snap, 8, 42, 1);
+  @samples = count();
+}
+
+interval:s:5
+{
+  print(@residency);
+  print(@samples);
+  zero(@residency);
+  zero(@samples);
+}

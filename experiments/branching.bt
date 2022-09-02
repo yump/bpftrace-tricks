@@ -1,0 +1,24 @@
+#!/usr/bin/env bpftrace
+
+//alas, this does not work
+/*
+kfunc:arch_freq_get_on_cpu, t:power:pstate_sample
+{
+  if ( strncmp(str(probe), "kfunc:arch_freq_get_on_cpu", 8) == 0 ) {
+    @arches = count();
+  } else {
+    @pstate_samples = count();
+  }
+}
+*/
+
+//this doesn't either
+
+kfunc:arch_freq_get_on_cpu, t:power:pstate_sample
+{
+  if ( probe == "kfunc:arch_freq_get_on_cpu" ) {
+    @arches = count();
+  } else {
+    @pstate_samples = count();
+  }
+}

@@ -1,0 +1,8 @@
+#!/usr/bin/env bpftrace
+
+t:power:pstate_sample 
+{ 
+  printf("core_busy=%d scaled_busy=%d from=%2d to=%2d mperf=%10d aperf=%10d tsc=%10d freq=%7d io_boost=%d\n",
+      args->core_busy, args->scaled_busy, args->from, args->to, args->mperf, 
+      args->aperf, args->tsc, args->freq, args->io_boost );
+}

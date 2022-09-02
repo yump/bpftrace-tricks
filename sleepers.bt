@@ -1,0 +1,24 @@
+#!/usr/bin/env bpftrace
+
+
+t:syscalls:sys_enter_clock_nanosleep 
+{ 
+  @start[tid]=nsecs; 
+}
+
+t:syscalls:sys_exit_clock_nanosleep 
+{
+  @sleep_ms[comm,pid]=hist((nsecs - @start[tid])/1e6); 
+  delete(@start[tid]);
+}
+
+interval:s:$1
+{
+  print(@sleep_ms);
+  clear(@sleep_ms);
+}
+
+END 
+{
+  clear(@start);
+}
