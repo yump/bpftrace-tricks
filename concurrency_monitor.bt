@@ -5,16 +5,7 @@
 
 #define MAX_CPU 256
 #define IGNORE_IDLE 0
-#define NANOS_PER_MILLE (1e6*$1/1000)
-
-// Silence annoying warning
-//BEGIN {
-//  $i = 0;
-//  while ($i < MAX_CPU +1) {
-//    @concurrency[$i] = sum(0);
-//    ++$i;
-//  }
-//}
+#define NANOS_PER_MILLE ((uint64) (1e6*$1/1000))
 
 // stupid way to find number of CPUs
 profile:hz:2
