@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bpftrace -k
+#!/usr/bin/env bpftrace
 
 // based on ../../really_dumb_concurrency_monitor.bt
 // This version ignores potential concurrency issues
@@ -68,11 +68,9 @@ interval:ms:$1
   $i = 0;
   while ($i < MAX_CPU+1) {
     $awake_nanos = @concurrency[$i];
-    printf("%3d : %4d\n",
-        $i, 
-        ($awake_nanos - @awake_nanos_last[$i]) / NANOS_PER_MILLE
-        );
+    $awake_per_mille = ($awake_nanos - @awake_nanos_last[$i]) / NANOS_PER_MILLE;
     @awake_nanos_last[$i] = $awake_nanos;
+    printf("%3d : %4d\n", $i, $awake_per_mille);
     // loop counter
     ++$i;
     if ($i > @last_cpu+1) {
