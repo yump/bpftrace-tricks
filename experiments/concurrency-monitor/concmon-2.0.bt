@@ -1,0 +1,49 @@
+#!/usr/bin/env -S bpftrace -k
+
+// based on ../../really_dumb_concurrency_monitor.bt
+
+#define MAX_CPU 256
+#define IGNORE_IDLE 0
+
+// stupid way to find number of CPUs
+profile:hz:2
+{
+  @last_cpu = cpu > @last_cpu ? cpu : @last_cpu;
+}
+
+// 354 ns total average runtime
+tracepoint:sched:sched_switch
+/ args.prev_pid == 0 || args.next_pid == 0 /
+{
+  @cpu_awake[cpu] = args.next_pid ? 1 : 0;
+  @switches = count();
+}
+
+interval:hz:257 
+{
+  // count active CPUs
+  $n_active = 0;
+  $cpu = 0;
+  while ($cpu < MAX_CPU) {
+    $n_active += @cpu_awake[$cpu];
+    ++$cpu;
+    if ($cpu > @last_cpu) {
+      break;
+    }
+  }
+  if (IGNORE_IDLE == 0 || $n_active > 0) {
+    @active_threads = lhist($n_active, 0, MAX_CPU, 1);
+  }
+  @average = stats(100*$n_active) //percent
+}
+
+interval:ms:$1
+{
+  print(@average);
+  zero(@average);
+  print(@active_threads);
+  zero(@active_threads);
+  print(@switches);
+  zero(@switches);
+}
+

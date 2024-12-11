@@ -1,0 +1,26 @@
+#!/usr/bin/env -S bpftrace -k
+
+profile:hz:1000
+{
+  $my_q = curtask->se.cfs_rq;
+  $nr_running = $my_q->nr_running;
+  $this_cpu_awake = $nr_running > 0;
+  @slice_cpus_awake = sum($this_cpu_awake);
+  @util[cpu] = avg($nr_running * 1000);
+}
+
+interval:hz:1000
+{
+  $slice_cpus_awake_samp = @slice_cpus_awake + 0;
+  @concurrency=lhist($slice_cpus_awake_samp, 0, 1000, 1);
+  @slice_cpus_awake = sum(-$slice_cpus_awake_samp);
+  //printf("%d cpus awake\n", $slice_cpus_awake_samp);
+}
+
+interval:s:1
+{
+  print(@concurrency);
+  zero(@concurrency);
+  print(@util);
+  clear(@util);
+}
