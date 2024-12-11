@@ -67,7 +67,7 @@ interval:ms:$1
   printf("Concurrency per mille\n");
   $i = 0;
   while ($i < MAX_CPU+1) {
-    $awake_nanos = @concurrency[$i];
+    $awake_nanos = 0 + @concurrency[$i];
     $awake_per_mille = ($awake_nanos - @awake_nanos_last[$i]) / NANOS_PER_MILLE;
     @awake_nanos_last[$i] = $awake_nanos;
     printf("%3d : %4d\n", $i, $awake_per_mille);
