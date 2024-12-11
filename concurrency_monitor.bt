@@ -1,0 +1,83 @@
+#!/usr/bin/env -S bpftrace -k
+
+// based on ../../really_dumb_concurrency_monitor.bt
+// This version ignores potential concurrency issues
+
+#define MAX_CPU 256
+#define IGNORE_IDLE 0
+#define NANOS_PER_MILLE (1e6*$1/1000)
+
+// Silence annoying warning
+//BEGIN {
+//  $i = 0;
+//  while ($i < MAX_CPU +1) {
+//    @concurrency[$i] = sum(0);
+//    ++$i;
+//  }
+//}
+
+// stupid way to find number of CPUs
+profile:hz:2
+{
+  @last_cpu = cpu > @last_cpu ? cpu : @last_cpu;
+}
+
+// 650 ns total average runtime, but only 62 ns under CPU saturation
+tracepoint:sched:sched_switch
+/ (args.prev_pid & args.next_pid) == 0 / // equiv prev == 0 || next == 0
+{
+  if (@last_event) {
+    // count active CPUs during last period
+    $n_active = 0;
+    $cpu = 0;
+    while ($cpu < MAX_CPU) {
+      $n_active += @cpu_awake[$cpu];
+      ++$cpu;
+      if ($cpu > @last_cpu) {
+        break;
+      }
+    }
+    @concurrency[$n_active] = sum(nsecs - @last_event);
+  }
+  @last_event = nsecs;
+  // register whether we are awake in the next period
+  @cpu_awake[cpu] = args.next_pid ? 1 : 0;
+}
+
+
+interval:ms:$1
+{
+  // Run the accounting loop once, just in case of 100% cpu saturation
+  if (@last_event) {
+    // count active CPUs during last period
+    $n_active = 0;
+    $cpu = 0;
+    while ($cpu < MAX_CPU) {
+      $n_active += @cpu_awake[$cpu];
+      ++$cpu;
+      if ($cpu > @last_cpu) {
+        break;
+      }
+    }
+    @concurrency[$n_active] = sum(nsecs - @last_event);
+  }
+  @last_event = nsecs; //synthetic, but that's okay!
+
+  // Show stats
+  printf("Concurrency per mille\n");
+  $i = 0;
+  while ($i < MAX_CPU+1) {
+    $awake_nanos = @concurrency[$i];
+    printf("%3d : %4d\n",
+        $i, 
+        ($awake_nanos - @awake_nanos_last[$i]) / NANOS_PER_MILLE
+        );
+    @awake_nanos_last[$i] = $awake_nanos;
+    // loop counter
+    ++$i;
+    if ($i > @last_cpu+1) {
+      break;
+    }
+  }
+}
+
