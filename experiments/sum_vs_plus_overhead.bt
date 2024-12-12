@@ -1,0 +1,91 @@
+#!/usr/bin/env bpftrace
+
+//summary:
+
+// 1. Writing shared global maps is expensive, even without atomics. If at
+//    all possible, use sum(), count(), etc.
+// 2. Reading from shared global maps is about 2x (latency) to 4x (throughput)
+//    cheaper than reading from sum()/count() percpu maps.
+// 3. Rolling your own @map[cpu] counters is bad. If bpftrace is recent enough
+//    to allow reading from sum()s synchrnously in kernel space, use it!
+
+// how2use:
+// First argument specifies unroll count. Second is for profile vs interval
+// sampling, which I thought might make a difference w cache line bouncing.
+// It didn't.
+
+#define BING_MASK 0x000000FF
+
+BEGIN {
+  printf("pop open bpftop in another terminal\n");
+}
+
+//total avg runtime, unroll=1:   44
+//total avg runtime, unroll=64: 797
+//     unroll=64 + interval:hz: 800
+$2:hz:6000
+{
+  unroll($1) { @sum_map = sum(1); }
+}
+
+//total avg runtime, unroll=1:   121
+//total avg runtime, unroll=64: 3292
+//     unroll=64 + interval:hz: 3083
+//... cache line bouncing?
+$2:hz:6001
+{
+  unroll($1) { @plus_map+=1; }
+}
+
+//total avg runtime, unroll=1:    99
+//total avg runtime, unroll=64: 3177
+//     unroll=64 + interval:hz: 3153
+$2:hz:6002
+{
+  unroll($1) { @percpu_plus_map[cpu]+=1; }
+}
+
+//total avg runtime, unroll=1:    91
+//total avg runtime, unroll=64: 2954
+//     unroll=64 + interval:hz: 2932
+interval:hz:4000
+{
+  unroll($1) {
+  $local = (int64) @sum_map;
+  if ($local & BING_MASK == 0) {
+    printf("sum_map: bing!\n");
+  }
+  }
+}
+
+//total avg runtime, unroll=1:   43
+//total avg runtime, unroll=64: 841
+//     unroll=64 + interval:hz: 684
+// ... maybe getting lucky and being in L1/L2 of the same core?
+interval:hz:4001
+{
+  unroll($1){
+  $local = (int64) @plus_map;
+  if ($local & BING_MASK == 0) {
+    printf("plus_map: bing!\n");
+  }
+  }
+}
+
+//total avg runtime, unroll=1:   112
+//total avg runtime, unroll=64: 2733
+//     unroll=64 + interval:hz: 2390
+interval:hz:4002
+{
+  unroll($1) {
+  $local = 0;
+  $i = 0;
+  while ($i < 4) {
+    $local += @percpu_plus_map[$i];
+    ++$i;
+  }
+  if ($local & BING_MASK == 0) {
+    printf("percpu_plus_map: bing!\n");
+  }
+  }
+}
