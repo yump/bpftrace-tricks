@@ -1,8 +1,16 @@
 #!/usr/bin/env bpftrace
 
+// Show open()s that take longer than 500 ms:
+// sudo bpftrace slow-file-open.bt 500000
+
+#ifndef FILTER
+#define FILTER 1
+#endif
+
 tracepoint:syscalls:sys_enter_open,
 tracepoint:syscalls:sys_enter_openat,
 tracepoint:syscalls:sys_enter_openat2
+/ FILTER /
 {
   @open_enter[tid] = nsecs;
   @open_arg_fn[tid] = str(args->filename);
@@ -11,13 +19,16 @@ tracepoint:syscalls:sys_enter_openat2
 tracepoint:syscalls:sys_exit_open,
 tracepoint:syscalls:sys_exit_openat,
 tracepoint:syscalls:sys_exit_openat2
+/ @open_enter[tid] /
 {
-  $elapsed = nsecs - @open_enter[tid];
+  $latency_us = (nsecs - @open_enter[tid]) / 1000;
   $filename = @open_arg_fn[tid];
-  if (args.ret >= 0) {
-    @open_lat[pid,comm,$filename] = stats($elapsed);
-  } else {
-    @open_fail_lat[pid,comm,$filename] = stats($elapsed);
+  if ($latency_us > $1) {
+    if (args.ret >= 0) {
+      @open_lat[pid,comm,$filename] = stats($latency_us);
+    } else {
+      @open_fail_lat[pid,comm,$filename] = stats($latency_us);
+    }
   }
 }
 
