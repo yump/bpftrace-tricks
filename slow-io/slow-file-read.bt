@@ -1,0 +1,28 @@
+#!/usr/bin/env bpftrace
+
+
+//based on Brendan Gregg's "fileslower.bt" from his book
+// https://github.com/brendangregg/bpf-perf-tools-book/blob/master/originals/Ch08_FileSystems/fileslower.bt
+
+#include <linux/fs.h>
+
+kfunc:vmlinux:vfs_read
+//kfunc:vmlinux:vfs_readv
+{
+  @tstart[tid] = nsecs;
+}
+
+kretfunc:vmlinux:vfs_read
+//kretfunc:vmlinux:vfs_readv
+{
+  $elapsed = nsecs - @tstart[tid];
+  $file = args.file;
+  if ($file->f_path.dentry->d_name.len != 0 && @tstart[tid]) {
+    $name = str($file->f_path.dentry->d_name.name);
+    @read_lat[comm,pid,$name] = stats($elapsed);
+  }
+}
+
+END {
+  clear(@tstart);
+}
